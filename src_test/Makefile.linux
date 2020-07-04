@@ -1,0 +1,175 @@
+#Please update this to the path to the kendryte toolchain
+TOOLCHAIN_PATH = ~/toolchain/kendryte-toolchain
+
+ROOTPATH = $(CURDIR)
+LIBC_PATH = $(TOOLCHAIN_PATH)/riscv64-unknown-elf/lib
+TOOL_PREFIX = $(TOOLCHAIN_PATH)/bin/
+LOCALTOOL_PREFIX = $(CURDIR)/../tools/
+
+LD = $(TOOL_PREFIX)riscv64-unknown-elf-ld
+AS = $(TOOL_PREFIX)riscv64-unknown-elf-as
+CC = $(TOOL_PREFIX)riscv64-unknown-elf-gcc
+# In linux, use the Mono C# compiler
+CCS = mcs
+
+OBJCOPY = $(TOOL_PREFIX)riscv64-unknown-elf-objcopy
+OBJDUMP = $(TOOL_PREFIX)riscv64-unknown-elf-objdump
+
+BIN2AOUT = $(LOCALTOOL_PREFIX)bin2aout
+
+# Choose between single and double precision float
+# You need to have the appropriate c libraries for whichever target you choose
+# Kendryte toolchain is Single Precision hardfloat
+CFLAGS_SINGLE_PRECISION_SOFTFLOAT = -mabi=lp64 -march=rv64imac -fsingle-precision-constant 
+# Enable this to remove all accesses to floating point registers, when in softfloat
+#CFLAGS_COMMON += -DSOFTFLOAT_TARGET
+
+CFLAGS_SINGLE_PRECISION = -mabi=lp64f -march=rv64imafc -fsingle-precision-constant 
+CFLAGS_DOUBLE_PRECISION = -mabi=lp64d -march=rv64gc
+
+CFLAGS_COMMON = $(CFLAGS_SINGLE_PRECISION)
+CFLAGS_COMMON += -Wall -O -fstrength-reduce  -fomit-frame-pointer -I include
+CFLAGS_COMMON += -mcmodel=medany -fno-common -ffunction-sections -fdata-sections -fstrict-volatile-bitfields
+CFLAGS_COMMON += -Wno-error=return-type -Wno-error=pointer-sign -Wno-missing-braces -Wno-strict-aliasing -Wno-implicit-fallthrough -Wno-missing-field-initializers
+CFLAGS_COMMON += -Wno-error=comment -Wno-error=logical-not-parentheses -Wno-error=duplicate-decl-specifier -Wno-error=parentheses
+CFLAGS_COMMON += -Wno-multichar -Wextra -Werror=frame-larger-than=32768 -Wno-unused-parameter -Wno-sign-compare -Wno-error=missing-braces
+CFLAGS_COMMON += -fno-zero-initialized-in-bss -ffast-math -fno-math-errno -Os -ggdb -Wall
+CFLAGS_COMMON += -static
+
+LFLAGS_COMMON = -Wl,--gc-sections
+LFLAGS_COMMON += -Wl,-static
+LFLAGS_COMMON += -Wl,-EL
+LFLAGS_COMMON += -Wl,--no-relax
+LFLAGS_COMMON += -Wl,-T linker.ld
+LFLAGS_COMMON += -Wl,-M
+LFLAGS_COMMON += -L$(TOOLCHAIN_PATH)/riscv64-unknown-elf/lib
+
+CFLAGS = $(CFLAGS_COMMON)
+CFLAGS += -nostdinc
+CFLAGS += -nostartfiles
+CFLAGS += -I $(ROOTPATH)/include -I $(ROOTPATH)/bsp/include -I $(ROOTPATH)/drivers/include -I $(ROOTPATH)/riscvfunc/include -I $(ROOTPATH)/trap/include
+LCFLAGS = $(LFLAGS_COMMON)
+
+CFLAGS_USER = $(CFLAGS_COMMON)
+LCFLAGS_USER = $(LFLAGS_COMMON)
+
+GCCINCLUDEFLAGS = -I $(ROOTPATH)/libgcc/include -I $(ROOTPATH)/libgcc/config/riscv
+
+INCLUDEFILE = ./include/*.h ./bsp/include/*.h ./drivers/include/*.h ./riscvfunc/include/*.h ./trap/include/*.h
+CSOURCEFILE = $(wildcard *.c ./bsp/*.c ./drivers/*.c ./riscvfunc/*.c ./startup/*.c ./trap/*.c ./kernel/*.c ./kernel/blk_drv/*.c ./kernel/chr_drv/*.c ./fs/*.c ./user/test/*.c)
+SSOURCEFILE = $(patsubst %.c,%.S,$(CSOURCEFILE))
+SOURCEFILE = $(CSOURCEFILE) $(SSOURCEFILE)
+COBJFILE = $(patsubst %.c,%.o,$(CSOURCEFILE))
+SOBJFILE = $(patsubst %.S,%.o,$(SSOURCEFILE))
+#OBJFILE = $(patsubst %.S,%.o,$(patsubst %.c,%.o,$(SOURCEFILE)))
+DEPFILE = $(patsubst %.S,%.d,$(patsubst %.c,%.d,$(SOURCEFILE)))
+BUILDING_USERNAME = jason
+
+default: system.bin system.txt ./user/test/test.aout 
+install: image.bin
+
+image.bin : system.bin system.txt rootfs.bin 
+	touch img.bin
+	dd if=system.bin of=image.bin
+	dd if=rootfs.bin of=image.bin bs=1024 seek=500
+	chmod 777 $(ROOTPATH)/image.bin
+	
+rootfs.bin : 
+	cp $(ROOTPATH)/user/test/test.aout ./
+	touch rootfs.bin
+	dd if=/dev/zero of=rootfs.bin bs=1024 count=360
+	mkfs.minix -n14 rootfs.bin 360
+	mkdir -p mnt
+	mount -o loop rootfs.bin mnt
+	mkdir mnt/dev
+	mknod mnt/dev/tty0 c 4 0
+	mkdir mnt/bin
+	cp $(ROOTPATH)/user/test/test.aout mnt/bin/sh
+	chmod 777 mnt/bin/sh
+	df -h mnt
+	umount mnt
+
+system.txt : system.elf
+	$(OBJDUMP) -d $< > $@
+
+system.bin : system.elf
+	$(OBJCOPY) -O binary $< $@
+
+system.elf : ./root_dir.o ./bsp/bsp.o ./drivers/drivers.o ./riscvfunc/riscvfunc.o ./startup/startup.o ./trap/trap.o ./kernel/kernel.o ./mm/mm.o ./fs/fs.o
+	$(CC) $(CFLAGS) $(LCFLAGS) -o $@ $^ $(LIBC_PATH)/libm.a $(LIBC_PATH)/libatomic.a $(LIBC_PATH)/libsim.a
+
+bin2aout:
+	$(CCS) ../tools_src/bin2aout/Program.cs -out:../tools/bin2aout
+
+./user/test/test.aout : ./user/test/test.bin bin2aout
+	$(BIN2AOUT) $< ./user/test/test.txt $@
+
+./user/test/test.bin : ./user/test/test.elf
+	$(OBJCOPY) -O binary $< $@
+
+./user/test/test.elf : ./user/test/test_main.c
+	$(CC) $(CFLAGS_USER) $(LCFLAGS_USER) -o $@ $^ $(LIBC_PATH)/libm.a $(LIBC_PATH)/libsim.a
+	$(OBJDUMP) -d ./user/test/test.elf  > ./user/test/test.txt
+
+./user/test/test.o : $(patsubst %.S,%.o,$(patsubst %.c,%.o,$(wildcard ./user/test/*.c ./user/test/*.S)))
+	$(LD) -r -o $@ $^
+	
+./root_dir.o : $(patsubst %.S,%.o,$(patsubst %.c,%.o,$(wildcard ./*.c ./*.S)))
+	$(LD) -r -o $@ $^
+
+./bsp/bsp.o : $(patsubst %.S,%.o,$(patsubst %.c,%.o,$(wildcard ./bsp/*.c ./bsp/*.S)))
+	$(LD) -r -o $@ $^
+	
+./drivers/drivers.o : $(patsubst %.S,%.o,$(patsubst %.c,%.o,$(wildcard ./drivers/*.c ./drivers/*.S)))
+	$(LD) -r -o $@ $^
+
+./riscvfunc/riscvfunc.o : $(patsubst %.S,%.o,$(patsubst %.c,%.o,$(wildcard ./riscvfunc/*.c ./riscvfunc/*.S)))
+	$(LD) -r -o $@ $^
+
+./startup/startup.o : $(patsubst %.S,%.o,$(patsubst %.c,%.o,$(wildcard ./startup/*.c ./startup/*.S)))
+	$(LD) -r -o $@ $^
+
+./trap/trap.o : $(patsubst %.S,%.o,$(patsubst %.c,%.o,$(wildcard ./trap/*.c ./trap/*.S)))
+	$(LD) -r -o $@ $^
+
+./kernel/kernel.o : $(patsubst %.S,%.o,$(patsubst %.c,%.o,$(wildcard ./kernel/*.c ./kernel/*.S ./kernel/blk_drv/*.c ./kernel/blk_drv/*.S ./kernel/*.S ./kernel/chr_drv/*.c ./kernel/chr_drv/*.S)))
+	$(LD) -r -o $@ $^
+
+./mm/mm.o : $(patsubst %.S,%.o,$(patsubst %.c,%.o,$(wildcard ./mm/*.c ./mm/*.S)))
+	$(LD) -r -o $@ $^
+
+./fs/fs.o : $(patsubst %.S,%.o,$(patsubst %.c,%.o,$(wildcard ./fs/*.c ./fs/*.S)))
+	$(LD) -r -o $@ $^
+
+%.o : %.c
+	$(CC) $(CFLAGS) -o $@ -c $<
+
+%.o : %.S
+	$(CC) $(CFLAGS) -o $@ -c $<
+
+%.d : %.c
+	$(CC) $(CFLAGS) -M -MF $(patsubst %.c,%.d,$<) -c $<
+
+%.d : %.S
+	$(CC) $(CFLAGS) -M -MF $(patsubst %.S,%.d,$<) -c $<
+
+include $(DEPFILE)
+	
+clean:
+	rm -f *.[od]
+	rm -f bsp/*.[od]
+	rm -f drivers/*.[od]
+	rm -f riscvfunc/*.[od]
+	rm -f startup/*.[od]
+	rm -f trap/*.[od]
+	rm -f kernel/*.[od]
+	rm -f kernel/blk_drv/*.[od]
+	rm -f kernel/chr_drv/*.[od]
+	rm -f mm/*.[od]
+	rm -f fs/*.[od]
+	rm -f system.elf
+	rm -f system.bin
+	rm -f rootfs.bin
+	rm -f image.bin
+	rm -f user/test/test_main.[od]
+	rm -f user/test/test.bin
