@@ -20,9 +20,7 @@ BIN2AOUT = $(LOCALTOOL_PREFIX)bin2aout
 # Choose between single and double precision float
 # You need to have the appropriate c libraries for whichever target you choose
 # Kendryte toolchain is Single Precision hardfloat
-CFLAGS_SINGLE_PRECISION_SOFTFLOAT = -mabi=lp64 -march=rv64imac -fsingle-precision-constant 
-# Enable this to remove all accesses to floating point registers, when in softfloat
-#CFLAGS_COMMON += -DSOFTFLOAT_TARGET
+# Can't get any other toolchain working
 
 CFLAGS_SINGLE_PRECISION = -mabi=lp64f -march=rv64imafc -fsingle-precision-constant 
 CFLAGS_DOUBLE_PRECISION = -mabi=lp64d -march=rv64gc
@@ -63,13 +61,12 @@ COBJFILE = $(patsubst %.c,%.o,$(CSOURCEFILE))
 SOBJFILE = $(patsubst %.S,%.o,$(SSOURCEFILE))
 #OBJFILE = $(patsubst %.S,%.o,$(patsubst %.c,%.o,$(SOURCEFILE)))
 DEPFILE = $(patsubst %.S,%.d,$(patsubst %.c,%.d,$(SOURCEFILE)))
-BUILDING_USERNAME = jason
 
 default: system.bin system.txt ./user/test/test.aout 
 install: image.bin
 
 image.bin : system.bin system.txt rootfs.bin 
-	touch img.bin
+	touch image.bin
 	dd if=system.bin of=image.bin
 	dd if=rootfs.bin of=image.bin bs=1024 seek=500
 	chmod 777 $(ROOTPATH)/image.bin

@@ -10,10 +10,10 @@ Download the Kendryte binary toolchain or compile it yourself - makefile current
 
 Install the Mono c-sharp compiler (eg sudo apt install mono-mcs)
 
-cd test_src
-make -f Makefile.linux
-sudo make -f Makefile.linux install
+- cd test_src
+- make -f Makefile.linux
+- sudo make -f Makefile.linux install
 
 Upload the new image to your K210 (subsitute dan with your board type)
 
-kflash image.bin -B dan -b 3000000 -t
+- kflash image.bin -B dan -b 3000000 -t
